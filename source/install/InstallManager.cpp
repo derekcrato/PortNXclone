@@ -1,0 +1,148 @@
+#include <install/InstallManager.hpp>
+#include <install/StreamInstallEngine.hpp>
+
+namespace pinx::install {
+
+InstallManager::~InstallManager() {
+    shutdown();
+}
+
+bool InstallManager::enqueueStream(const StreamRequest &req) {
+    bool needs_start = false;
+    StreamRequest first;
+
+    {
+        std::lock_guard<std::mutex> lk(str_mtx);
+        job_queue_.push_back(req);
+        if(!busy.load()) {
+            busy.store(true);
+            first = std::move(job_queue_.front());
+            job_queue_.pop_front();
+            display_name = first.display_name;
+            error.clear();
+            warning_.clear();
+            needs_start = true;
+        }
+    }
+
+    if(needs_start) {
+        cancel_flag.store(false);
+        state.store(State::Running);
+        bytes_done.store(0);
+        bytes_total.store(0);
+        decompressing.store(false);
+        title_id.store(0);
+        {
+            std::lock_guard<std::mutex> lk2(str_mtx);
+            active_url_ = first.url;
+        }
+        if(worker.joinable()) worker.join();
+        worker = std::thread([this, first = std::move(first)]() mutable {
+            runStream(std::move(first));
+        });
+    }
+    return true;
+}
+
+void InstallManager::cancel() {
+    cancel_flag.store(true);
+}
+
+void InstallManager::shutdown() {
+    {
+        std::lock_guard<std::mutex> lk(str_mtx);
+        job_queue_.clear();
+    }
+    cancel_flag.store(true);
+    if(worker.joinable()) worker.join();
+}
+
+InstallManager::Snapshot InstallManager::snapshot() const {
+    Snapshot s;
+    s.state         = state.load();
+    s.bytes_done    = bytes_done.load();
+    s.bytes_total   = bytes_total.load();
+    s.decompressing = decompressing.load();
+    s.title_id      = title_id.load();
+    s.completions   = completions.load();
+    std::lock_guard<std::mutex> lk(str_mtx);
+    s.display_name    = display_name;
+    s.active_url      = active_url_;
+    s.error           = error;
+    s.warning         = warning_;
+    s.completed_names = completed_names_;
+    s.installed_urls  = installed_urls_;
+    for(const auto &j : job_queue_) {
+        s.queue_names.push_back(j.display_name);
+        s.queue_urls.push_back(j.url);
+    }
+    return s;
+}
+
+void InstallManager::runStream(StreamRequest req) {
+    while(true) {
+        StreamInstallRequest sir;
+        sir.url            = req.url;
+        sir.http_opts      = req.http_opts;
+        sir.install_config = req.install_config;
+
+        const InstallResult result = StreamInstallFromUrl(sir,
+            [this](const InstallProgress &p) {
+                bytes_done.store(p.bytes_done);
+                bytes_total.store(p.bytes_total);
+                decompressing.store(p.decompressing);
+            },
+            [this] { return cancel_flag.load(); });
+
+        if(result.success) {
+            title_id.store(result.title_id);
+            {
+                std::lock_guard<std::mutex> lk(str_mtx);
+                warning_ = result.warning;
+                completed_names_.push_back(req.display_name);
+                installed_urls_.push_back(req.url);
+            }
+            completions.fetch_add(1, std::memory_order_relaxed);
+            state.store(State::Done);
+        } else {
+            {
+                std::lock_guard<std::mutex> lk(str_mtx);
+                error   = result.error_message;
+                warning_ = result.warning;
+            }
+            state.store(State::Failed);
+        }
+
+        StreamRequest next;
+        bool has_next = false;
+        {
+            std::lock_guard<std::mutex> lk(str_mtx);
+            if(!job_queue_.empty()) {
+                next = std::move(job_queue_.front());
+                job_queue_.pop_front();
+                display_name = next.display_name;
+                active_url_  = next.url;
+                error.clear();
+                warning_.clear();
+                has_next = true;
+            } else {
+                active_url_.clear();
+                busy.store(false);
+            }
+        }
+        if(has_next) {
+            cancel_flag.store(false);
+        }
+
+        if(!has_next) break;
+
+        state.store(State::Running);
+        bytes_done.store(0);
+        bytes_total.store(0);
+        decompressing.store(false);
+        title_id.store(0);
+        req = std::move(next);
+    }
+}
+
+}

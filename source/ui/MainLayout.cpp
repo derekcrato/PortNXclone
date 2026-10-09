@@ -1,0 +1,426 @@
+#include <ui/MainLayout.hpp>
+#include <ui/MainApplication.hpp>
+#include <ui/DetailsTab.hpp>
+#include <app/I18n.hpp>
+
+namespace pinx::ui {
+
+static constexpr pu::ui::Color kBlack    = {   0,   0,   0, 255 };
+static constexpr pu::ui::Color kTopBarBg = {  12,  12,  18, 255 };
+static constexpr pu::ui::Color kWhite    = { 255, 255, 255, 255 };
+static constexpr pu::ui::Color kMuted    = { 160, 160, 175, 255 };
+static constexpr pu::ui::Color kCardDark = {  14,  14,  20, 255 };
+
+static constexpr pu::ui::Color kSnesColors[3] = {
+    { 196,   0,   0, 255 },
+    {  20,  80, 200, 255 },
+    {   0, 140,   0, 255 },
+};
+
+static constexpr const char *kTabKeys[3] = {
+    "tabs.ports", "tabs.queue", "tabs.settings"
+};
+
+static const std::string kFontMedium = pu::ui::GetDefaultFont(pu::ui::DefaultFontSize::Medium);
+static const std::string kFontSmall  = pu::ui::GetDefaultFont(pu::ui::DefaultFontSize::Small);
+
+s32 MainLayout::CardX(const s32 idx) {
+    const s32 gap = (kW - kTabCount * kCardW) / (kTabCount + 1);
+    return gap + idx * (kCardW + gap);
+}
+
+MainLayout::MainLayout(MainApplication *app)
+    : pu::ui::Layout(), app_(app)
+{
+    this->SetBackgroundColor(kBlack);
+    BuildHome();
+    BuildContentHeader();
+    details_ = std::make_unique<DetailsTab>(
+        pinx::catalog::CatalogItem{}, [this]() { HideDetails(); },
+        [this](const pinx::catalog::CatalogItem &item) {
+            if (item.is_installable) {
+                pinx::install::InstallManager::StreamRequest req;
+                req.url                            = item.url;
+                req.display_name                   = item.name;
+                req.http_opts.verify_tls           = false;
+                req.http_opts.connect_timeout_ms   = 8000;
+                req.install_config.dest_storage_id = app_->GetConfig()->install_to_nand
+                    ? NcmStorageId_BuiltInUser : NcmStorageId_SdCard;
+                req.install_config.ignore_req_fw   = true;
+                req.install_config.reinstall_ncas  = false;
+                app_->GetInstaller()->enqueueStream(req);
+            } else {
+                mkdir("sdmc:/switch/PortNX/downloads", 0777);
+                pinx::download::DownloadManager::Request req;
+                req.url           = item.url;
+                req.name          = item.name;
+                req.dest_path     = "sdmc:/switch/PortNX/downloads/" + item.filename;
+                req.expected_size = item.size_authoritative ? item.size : 0;
+                req.expected_sha256 = item.sha256;
+                req.verify_tls    = false;
+                app_->GetDownloader()->start(req);
+            }
+            HideDetails();
+        });
+    details_->AddElementsTo(this);
+    BuildTabs();
+    ShowHome();
+
+    this->SetOnInput([this](const u64 kd, const u64 ku, const u64 kh,
+                             const pu::ui::TouchPoint tp) {
+        OnInput(kd, ku, kh, tp);
+    });
+}
+
+void MainLayout::BuildHome() {
+    home_bg_ = pu::ui::elm::Rectangle::New(0, 0, kW, kH, kBlack);
+    this->Add(home_bg_);
+
+    {
+        static constexpr s32 kLogoSz = 300;
+        static constexpr s32 kLogoX  = (kW - kLogoSz) / 2;
+        static constexpr s32 kLogoY  = (kCardY - kLogoSz) / 2;
+        auto raw = pu::ui::render::LoadImageFromFile("romfs:/icon.jpg");
+        pu::sdl2::TextureHandle::Ref th = raw ? pu::sdl2::TextureHandle::New(raw) : nullptr;
+        home_logo_ = pu::ui::elm::Image::New(kLogoX, kLogoY, th);
+        home_logo_->SetWidth(kLogoSz);
+        home_logo_->SetHeight(kLogoSz);
+        this->Add(home_logo_);
+    }
+
+    static constexpr const char *kIconPaths[] = {
+        "romfs:/download.png",
+        "romfs:/queue.png",
+        "romfs:/settings.png",
+    };
+
+    for (s32 i = 0; i < kTabCount; ++i) {
+        const s32 cx = CardX(i);
+
+        card_bg_[i] = pu::ui::elm::Rectangle::New(cx, kCardY, kCardW, kCardH, kCardDark, 20);
+        this->Add(card_bg_[i]);
+
+        {
+            auto raw = pu::ui::render::LoadImageFromFile(kIconPaths[i]);
+            pu::sdl2::TextureHandle::Ref th = raw ? pu::sdl2::TextureHandle::New(raw) : nullptr;
+            card_icon_img_[i] = pu::ui::elm::Image::New(cx + 30, kCardY + 30, th);
+            card_icon_img_[i]->SetWidth(300);
+            card_icon_img_[i]->SetHeight(300);
+            if (!th) card_icon_img_[i]->SetVisible(false);
+            this->Add(card_icon_img_[i]);
+        }
+
+        card_label_[i] = pu::ui::elm::TextBlock::New(cx, kCardY + kCardH + 30,
+                                                      pinx::i18n::tr(kTabKeys[i]));
+        card_label_[i]->SetColor(kWhite);
+        card_label_[i]->SetFont(kFontMedium);
+        this->Add(card_label_[i]);
+    }
+
+    home_hint_tb_ = pu::ui::elm::TextBlock::New(0, 1022, "");
+    home_hint_tb_->SetColor(kMuted);
+    home_hint_tb_->SetFont(kFontSmall);
+    this->Add(home_hint_tb_);
+
+    RefreshHints();
+}
+
+void MainLayout::RefreshHints() {
+    const std::string h = std::string("\xEE\x81\xBD ") + pinx::i18n::tr("hints.navigate") +
+                          "    \xEE\x82\xA0 " + pinx::i18n::tr("hints.open") +
+                          "    \xEE\x82\xB5 " + pinx::i18n::tr("hints.exit");
+    home_hint_tb_->SetText(h);
+    home_hint_tb_->SetX(kW / 2 - home_hint_tb_->GetWidth() / 2);
+
+    if (content_back_hint_)
+        content_back_hint_->SetText(std::string("\xEE\x82\xA1 ") + pinx::i18n::tr("hints.back_menu"));
+
+    for (s32 i = 0; i < kTabCount; ++i) {
+        const s32 cx = CardX(i);
+        card_label_[i]->SetText(pinx::i18n::tr(kTabKeys[i]));
+        card_label_[i]->SetX(cx + kCardW / 2 - card_label_[i]->GetWidth() / 2);
+    }
+}
+
+void MainLayout::BuildContentHeader() {
+    content_topbar_ = pu::ui::elm::Rectangle::New(0, 0, kW, kTopBarH, kTopBarBg);
+    content_topbar_->SetVisible(false);
+    this->Add(content_topbar_);
+
+    content_title_ = pu::ui::elm::TextBlock::New(48, 24, "");
+    content_title_->SetColor(kWhite);
+    content_title_->SetFont(pu::ui::GetDefaultFont(pu::ui::DefaultFontSize::Large));
+    content_title_->SetVisible(false);
+    this->Add(content_title_);
+
+    content_back_hint_ = pu::ui::elm::TextBlock::New(kW - 300, 38, "");
+    content_back_hint_->SetColor(kMuted);
+    content_back_hint_->SetFont(kFontSmall);
+    content_back_hint_->SetVisible(false);
+    this->Add(content_back_hint_);
+
+    RefreshHints();
+}
+
+void MainLayout::BuildTabs() {
+    browse_   = std::make_unique<BrowseTab>(app_->GetConfig(),
+                                            app_->GetDownloader(),
+                                            app_->GetInstaller());
+    browse_->SetOnShowDetails([this](const pinx::catalog::CatalogItem &item) {
+        ShowDetails(item);
+    });
+    queue_    = std::make_unique<QueueTab>(app_->GetDownloader(),
+                                           app_->GetInstaller());
+    settings_ = std::make_unique<SettingsTab>(app_->GetConfig(), [this]() {
+        browse_->reload();
+    }, [this]() {
+        pinx::i18n::Init(app_->GetConfig()->language);
+        RefreshStrings();
+    });
+
+    browse_->AddElementsTo(this);
+    queue_->AddElementsTo(this);
+    settings_->AddElementsTo(this);
+}
+
+void MainLayout::ShowDetails(const pinx::catalog::CatalogItem &item) {
+    details_mode_ = true;
+    browse_->Hide();
+    queue_->Hide();
+    settings_->Hide();
+    home_bg_->SetVisible(false);
+    if (home_logo_) home_logo_->SetVisible(false);
+    for (s32 i = 0; i < kTabCount; ++i) {
+        card_bg_[i]->SetVisible(false);
+        if (card_icon_img_[i]) card_icon_img_[i]->SetVisible(false);
+        card_label_[i]->SetVisible(false);
+    }
+    home_hint_tb_->SetVisible(false);
+    content_topbar_->SetVisible(false);
+    content_title_->SetVisible(false);
+    content_back_hint_->SetVisible(false);
+
+    if (!details_) {
+        details_ = std::make_unique<DetailsTab>(
+            item, [this]() { HideDetails(); },
+            [this](const pinx::catalog::CatalogItem &i) {
+                if (i.is_installable) {
+                    pinx::install::InstallManager::StreamRequest req;
+                    req.url                            = i.url;
+                    req.display_name                   = i.name;
+                    req.http_opts.verify_tls           = false;
+                    req.http_opts.connect_timeout_ms   = 8000;
+                    req.install_config.dest_storage_id = app_->GetConfig()->install_to_nand
+                        ? NcmStorageId_BuiltInUser : NcmStorageId_SdCard;
+                    req.install_config.ignore_req_fw   = true;
+                    req.install_config.reinstall_ncas  = false;
+                    app_->GetInstaller()->enqueueStream(req);
+                } else {
+                    mkdir("sdmc:/switch/PortNX/downloads", 0777);
+                    pinx::download::DownloadManager::Request req;
+                    req.url           = i.url;
+                    req.name          = i.name;
+                    req.dest_path     = "sdmc:/switch/PortNX/downloads/" + i.filename;
+                    req.expected_size = i.size_authoritative ? i.size : 0;
+                    req.expected_sha256 = i.sha256;
+                    req.verify_tls    = false;
+                    app_->GetDownloader()->start(req);
+                }
+                HideDetails();
+            });
+        details_->AddElementsTo(this);
+    } else {
+        details_->SetItem(item);
+    }
+    details_->Show();
+}
+
+void MainLayout::HideDetails() {
+    details_mode_ = false;
+    if (details_) details_->Hide();
+    if (home_mode_) {
+        ShowHome();
+    } else {
+        content_topbar_->SetVisible(true);
+        content_title_->SetVisible(true);
+        content_back_hint_->SetVisible(true);
+        switch (current_tab_) {
+            case Tab::Browse:   browse_->Show();   break;
+            case Tab::Queue:    queue_->Show();    break;
+            case Tab::Settings: settings_->Show(); break;
+            default: break;
+        }
+    }
+}
+
+void MainLayout::RefreshStrings() {
+    RefreshHints();
+    browse_->RefreshStrings();
+    queue_->RefreshStrings();
+    settings_->RefreshStrings();
+    if (!home_mode_)
+        content_title_->SetText(pinx::i18n::tr(kTabKeys[static_cast<u8>(current_tab_)]));
+}
+
+void MainLayout::ShowHome() {
+    home_mode_ = true;
+
+    home_bg_->SetVisible(true);
+    if (home_logo_) home_logo_->SetVisible(true);
+    for (s32 i = 0; i < kTabCount; ++i) {
+        card_bg_[i]->SetVisible(true);
+        if (card_icon_img_[i]) card_icon_img_[i]->SetVisible(true);
+        card_label_[i]->SetVisible(true);
+    }
+    home_hint_tb_->SetVisible(true);
+
+    content_topbar_->SetVisible(false);
+    content_title_->SetVisible(false);
+    content_back_hint_->SetVisible(false);
+
+    browse_->Hide();
+    queue_->Hide();
+    settings_->Hide();
+
+    UpdateCardColors();
+}
+
+void MainLayout::EnterTab(Tab t) {
+    home_mode_   = false;
+    current_tab_ = t;
+
+    home_bg_->SetVisible(false);
+    if (home_logo_) home_logo_->SetVisible(false);
+    for (s32 i = 0; i < kTabCount; ++i) {
+        card_bg_[i]->SetVisible(false);
+        if (card_icon_img_[i]) card_icon_img_[i]->SetVisible(false);
+        card_label_[i]->SetVisible(false);
+    }
+    home_hint_tb_->SetVisible(false);
+
+    content_topbar_->SetVisible(true);
+    content_title_->SetVisible(true);
+    content_back_hint_->SetVisible(true);
+    content_title_->SetText(pinx::i18n::tr(kTabKeys[static_cast<u8>(t)]));
+
+    browse_->Hide();
+    queue_->Hide();
+    settings_->Hide();
+    switch (t) {
+        case Tab::Browse:   browse_->Show();   break;
+        case Tab::Queue:    queue_->Show();    break;
+        case Tab::Settings: settings_->Show(); break;
+        default: break;
+    }
+}
+
+void MainLayout::BackToHome() {
+    browse_->Hide();
+    queue_->Hide();
+    settings_->Hide();
+    ShowHome();
+}
+
+void MainLayout::OnSettingsChanged() {
+    browse_->reload();
+    EnterTab(Tab::Browse);
+}
+
+void MainLayout::UpdateCardColors() {
+    for (s32 i = 0; i < kTabCount; ++i) {
+        if (i == home_sel_) {
+            card_bg_[i]->SetColor(kSnesColors[i]);
+            card_label_[i]->SetColor(kWhite);
+        } else {
+            card_bg_[i]->SetColor(kCardDark);
+            card_label_[i]->SetColor(kMuted);
+        }
+    }
+}
+
+void MainLayout::OnInput(u64 kd, u64 /*ku*/, u64 /*kh*/, pu::ui::TouchPoint tp) {
+    if (kd & HidNpadButton_Plus) {
+        app_->GetDownloader()->cancel();
+        app_->GetInstaller()->cancel();
+        app_->CloseWithFadeOut();
+        return;
+    }
+
+    if (details_mode_) {
+        if ((kd & HidNpadButton_B) || (kd & HidNpadButton_Y)) {
+            HideDetails();
+            return;
+        }
+        if (kd & HidNpadButton_A) {
+            if (details_) details_->TriggerInstall();
+            return;
+        }
+        if (!tp.IsEmpty()) {
+            if (tp.HitsRegion(1500, 960, 300, 60)) {
+                if (details_) details_->TriggerInstall();
+            }
+        }
+        return;
+    }
+
+    if (home_mode_) {
+        if ((kd & HidNpadButton_Left) || (kd & HidNpadButton_StickLLeft) || (kd & HidNpadButton_StickRLeft)) {
+            if (home_sel_ > 0) { --home_sel_; UpdateCardColors(); }
+        }
+        if ((kd & HidNpadButton_Right) || (kd & HidNpadButton_StickLRight) || (kd & HidNpadButton_StickRRight)) {
+            if (home_sel_ < kTabCount - 1) { ++home_sel_; UpdateCardColors(); }
+        }
+        if (kd & HidNpadButton_A) {
+            EnterTab(static_cast<Tab>(home_sel_));
+        }
+        if (!tp.IsEmpty()) {
+            for (s32 i = 0; i < kTabCount; ++i) {
+                if (tp.HitsRegion(CardX(i), kCardY, kCardW, kCardH)) {
+                    if (home_sel_ == i) {
+                        EnterTab(static_cast<Tab>(i));
+                    } else {
+                        home_sel_ = i;
+                        UpdateCardColors();
+                    }
+                    break;
+                }
+            }
+        }
+    } else {
+        if (current_tab_ == Tab::Browse) {
+            if (browse_->HandleInput(kd)) {
+                browse_->Poll();
+                queue_->Poll();
+                settings_->Poll();
+                return;
+            }
+        }
+
+        if (kd & HidNpadButton_B) {
+            BackToHome();
+            return;
+        }
+
+        if (current_tab_ == Tab::Queue && (kd & HidNpadButton_X) && queue_->IsActive()) {
+            queue_->CancelCurrent();
+            return;
+        }
+
+        if (!tp.IsEmpty()) {
+            if (tp.HitsRegion(0, 0, kW, kTopBarH)) {
+                BackToHome();
+                return;
+            }
+        }
+
+        if (!tp.IsEmpty() && current_tab_ == Tab::Browse) {
+            browse_->HandleTouch(tp);
+        }
+
+        browse_->Poll();
+        queue_->Poll();
+        settings_->Poll();
+    }
+}
+
+}
