@@ -140,15 +140,49 @@
         <div class="details-install-hint" id="installBtn">✅ Instalar / Baixar</div>
     </div>
 
-    <script src="games.js"></script>
     <script>
         let currentTab = 0;
-        let allGames = GAMES_DATA;
-        let games = GAMES_DATA;
+        let allGames = [];
+        let games = [];
         let selectedIndex = 0;
         let currentView = 'home'; // home, browse, details
         let currentPage = 0;
         const GAMES_PER_PAGE = 6;
+        
+        async function loadGames() {
+            try {
+                const response = await fetch('../index.json');
+                const data = await response.json();
+                const titledb = data.titledb || {};
+                const gamesList = [];
+                for (const [key, v] of Object.entries(titledb)) {
+                    gamesList.push({
+                        id: v.id || key,
+                        name: v.name || '',
+                        description: v.description || '',
+                        notes: v.notes || '',
+                        region: v.region || 'US',
+                        publisher: v.publisher || '',
+                        releaseDate: v.releaseDate || 0,
+                        rating: v.rating || 0,
+                        size: v.size || 0,
+                        iconUrl: v.iconUrl || '',
+                        version: String(v.version || 0),
+                        portedFrom: v.portedFrom || '',
+                        genre: v.genre || ''
+                    });
+                }
+                allGames = gamesList;
+                games = gamesList;
+                populateFilters();
+                renderGrid();
+                renderPagination();
+                document.getElementById('loading').classList.add('hidden');
+            } catch (e) {
+                console.error('Erro ao carregar index.json:', e);
+                document.getElementById('loading').textContent = 'Erro ao carregar catálogo';
+            }
+        }
         
         function formatSize(bytes) {
             if (!bytes) return 'Tamanho desconhecido';
@@ -428,10 +462,8 @@
         document.getElementById('filterSort').addEventListener('change', applyFilters);
         document.getElementById('filterRegion').addEventListener('change', applyFilters);
         
-        // Init
-        populateFilters();
-        renderGrid();
-        renderPagination();
+        // Init - load games from index.json
+        loadGames();
     </script>
 </body>
 </html>

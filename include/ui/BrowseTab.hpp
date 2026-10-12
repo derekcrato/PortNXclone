@@ -91,18 +91,18 @@ class BrowseTab {
         static constexpr s32 kGridCols  = 3;
         static constexpr s32 kGridRows  = 2;
         static constexpr s32 kGridPage  = kGridCols * kGridRows; // 6
-        static constexpr s32 kCellW     = 560;
-        static constexpr s32 kCellH     = 420;
-        static constexpr s32 kIconSz    = 256;
-        static constexpr s32 kGridX     = 120;
-        static constexpr s32 kGridY     = 130;
+        static constexpr s32 kCellW     = 380;
+        static constexpr s32 kCellH     = 300;
+        static constexpr s32 kIconSz    = 192;
+        static constexpr s32 kGridX     = 40;
+        static constexpr s32 kGridY     = 140;
 
         static constexpr s32 kListRows   = 8;
-        static constexpr s32 kListX      = 120;
-        static constexpr s32 kListY      = 108;
-        static constexpr s32 kListW      = 1680;
-        static constexpr s32 kListH      = 96;
-        static constexpr s32 kListIconSz = 72;
+        static constexpr s32 kListX      = 40;
+        static constexpr s32 kListY      = 140;
+        static constexpr s32 kListW      = 1200;
+        static constexpr s32 kListH      = 60;
+        static constexpr s32 kListIconSz = 48;
 
         static constexpr s32 kMaxCells  = kListRows;
 

@@ -1,0 +1,50 @@
+name: Build PortNX
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+      options: --user root
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          dkp-pacman -Sy --noconfirm switch-dev switch-portlibs
+
+      - name: Build Plutonium
+        run: |
+          cd lib/plutonium/Plutonium
+          make -j$(nproc)
+
+      - name: Build PortNX
+        run: |
+          cd /github/workspace
+          make -j$(nproc)
+
+      - name: Upload NRO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PortNX.nro
+          path: PortNX.nro
+          retention-days: 30
+
+      - name: Upload release zip
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: PortNX-release
+          path: PortNX-v*.zip
+          retention-days: 90

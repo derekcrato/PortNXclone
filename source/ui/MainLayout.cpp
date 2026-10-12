@@ -3,6 +3,9 @@
 #include <ui/DetailsTab.hpp>
 #include <app/I18n.hpp>
 
+#include <sys/stat.h>
+#include <sys/types.h>
+
 namespace pinx::ui {
 
 static constexpr pu::ui::Color kBlack    = {   0,   0,   0, 255 };

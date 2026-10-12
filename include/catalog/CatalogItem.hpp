@@ -30,6 +30,9 @@ struct CatalogItem {
     std::string   publisher;       // publisher name
     std::uint64_t release_date = 0; // YYYYMMDD integer, 0 = unknown
     int           rating = 0;      // 0-10, 0 = unset
+    bool          is_installable = false; // true if item can be installed
+    std::string   genre;          // e.g. Ação, RPG, Puzzle
+    std::string   portedFrom;     // origin platform: PC, Android, Arcade, etc.
 };
 
 } // namespace pinx::catalog

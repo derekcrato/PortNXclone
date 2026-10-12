@@ -92,6 +92,8 @@ struct TitleMeta {
     std::string   publisher;
     std::uint64_t release_date = 0;
     int           rating = 0;
+    std::string   genre;
+    std::string   portedFrom;
 };
 
 std::uint64_t AsUint(const json &j) {
@@ -167,6 +169,12 @@ std::unordered_map<std::string, TitleMeta> ParseTitledb(const json &j) {
             else if(v["rating"].is_number_unsigned()) {
                 m.rating = static_cast<int>(v["rating"].get<std::uint64_t>());
             }
+        }
+        if(v.contains("genre") && v["genre"].is_string()) {
+            m.genre = v["genre"].get<std::string>();
+        }
+        if(v.contains("portedFrom") && v["portedFrom"].is_string()) {
+            m.portedFrom = v["portedFrom"].get<std::string>();
         }
         db.emplace(ToUpper(it.key()), std::move(m));
     }
@@ -265,20 +273,22 @@ ParseResult ParseIndex(const std::string &body, const std::string &base_url) {
             if(!tid.empty()) {
                 try { it.title_id = std::stoull(tid, nullptr, 16); } catch(...) {}
 
-                const auto found = titledb.find(tid);
-                if(found != titledb.end()) {
-                    const TitleMeta &m = found->second;
-                    if(it.name.empty())    it.name     = m.name;
-                    if(it.size == 0)       it.size     = m.size;
-                    if(it.version.empty()) it.version  = m.version;
-                    it.icon_url = m.icon_url;
-                    it.description      = m.description;
-                    it.notes            = m.notes;
-                    it.region           = m.region;
-                    it.publisher        = m.publisher;
-                    it.release_date     = m.release_date;
-                    it.rating           = m.rating;
-                }
+const auto found = titledb.find(tid);
+            if(found != titledb.end()) {
+                const TitleMeta &m = found->second;
+                if(it.name.empty())    it.name     = m.name;
+                if(it.size == 0)       it.size     = m.size;
+                if(it.version.empty()) it.version  = m.version;
+                it.icon_url = m.icon_url;
+                it.description      = m.description;
+                it.notes            = m.notes;
+                it.region           = m.region;
+                it.publisher        = m.publisher;
+                it.release_date     = m.release_date;
+                it.rating           = m.rating;
+                it.genre            = m.genre;
+                it.portedFrom       = m.portedFrom;
+            }
             }
             for(const char *k : {"tid", "title_id", "titleId"}) {
                 if(f.is_object() && f.contains(k)) {

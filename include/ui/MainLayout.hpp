@@ -25,12 +25,12 @@ public:
     void HideDetails();
 
 private:
-    static constexpr s32 kW = 1920, kH = 1080;
-    static constexpr s32 kTopBarH  = 100;
+    static constexpr s32 kW = 1280, kH = 720;
+    static constexpr s32 kTopBarH  = 80;
     static constexpr s32 kTabCount = static_cast<s32>(Tab::Count);
     static constexpr s32 kCardW = 360;
     static constexpr s32 kCardH = 360;
-    static constexpr s32 kCardY = 440;
+    static constexpr s32 kCardY = 380;
 
 MainApplication *app_;
     Tab  current_tab_ = Tab::Browse;
