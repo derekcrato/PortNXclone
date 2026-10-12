@@ -21,14 +21,18 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Initialize submodules
+      - name: Verify submodule
         run: |
-          git submodule update --init --recursive --remote
           ls -la lib/plutonium/
+          if [ ! -f lib/plutonium/Plutonium/Makefile ]; then
+            echo "Submodule not populated, initializing..."
+            git submodule update --init --recursive --remote
+          fi
+          ls -la lib/plutonium/Plutonium/
 
       - name: Install dependencies
         run: |
-          dkp-pacman -Sy --noconfirm switch-dev switch-portlibs
+          dkp-pacman -Sy --noconfirm switch-dev switch-portlibs make git
 
       - name: Build Plutonium
         run: |
